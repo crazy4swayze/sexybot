@@ -29,6 +29,7 @@ my %admin_commands = (
         );
 my %commands = (
         buy => \&buy,
+        calc => \&calc,
         cash => \&steal,
         inv  => \&inv,
         rank => \&rank,
@@ -109,6 +110,20 @@ sub buy {
 
         $irc->yield(privmsg => $channel => "$player: You have purchased $amount $item(s) for \$$cost dollars. You now have \$$balance dollar(s).")
     }
+}
+
+sub calc {
+    my ($player) = @_;
+
+    return unless exists $players{$player};
+    my $cash = $players{$player}->{balance};
+    my $num_guns   = int $cash / $players{$player}->{gun};
+    my $num_pros   = int $cash / $players{$player}->{prostitue};
+    my $num_charms = int $cash / $players{$player}->{charm};
+
+    my $msg = "You can purchase: $num_pros prostitute(s) | $num_guns gun(s) "
+        . "| $num_charms charms.";
+    $irc->yield(notice => $name => $msg)
 }
 
 sub commafy {
