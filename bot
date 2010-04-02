@@ -123,7 +123,7 @@ sub calc {
 
     my $msg = "You can purchase: $num_pros prostitute(s) | $num_guns gun(s) "
         . "| $num_charms charms.";
-    $irc->yield(notice => $name => $msg)
+    $irc->yield(notice => $player => $msg)
 }
 
 sub commafy {
