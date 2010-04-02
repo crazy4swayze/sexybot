@@ -1,0 +1,329 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use bignum;
+use Player;
+use POE             qw<Component::IRC::State>;
+use POE::Component::IRC::Common qw<:ALL>;
+use POE::Component::IRC::Plugin::AutoJoin;
+use List::Util      qw<sum>;
+use List::MoreUtils qw<firstidx>;
+use Storable        qw<lock_store lock_retrieve>;
+
+my ($irc, %players);
+my $channel = '#sexytime';
+my %channels = (
+        $channel => '',
+        );
+my $db = '/home/associat/g/goldfish/sexybot/scores.db';
+ my %weapons = (
+   gun        => { price => 5000,  skill => 6 },
+   prostitute => { price => 2000,  skill => 2 },
+   charm      => { price => 10000, skill => 0 },
+);
+
+my %admin_commands = (
+        reset => \&reset,
+        merge => \&merge,
+        );
+my %commands = (
+        buy => \&buy,
+        cash => \&steal,
+        inv  => \&inv,
+        rank => \&rank,
+        sell => \&sell,
+        store => \&show_store,
+        top3  => \&top3,
+        );
+
+POE::Session->create(
+    package_states => [
+        (__PACKAGE__) => [qw(
+_start
+irc_public
+save_scores
+)],
+    ],
+);
+ 
+POE::Kernel->run();
+ 
+sub _start {
+     load_scores();
+ 
+    $irc = POE::Component::IRC::State->spawn(
+        server => 'irc.he.net',
+        username => 'sexybot',
+        nick => 'sexybot',
+        debug => 1,
+        plugin_debug => 1,
+        Flood => 1
+    );
+ 
+    $irc->plugin_add('autojoin',
+            POE::Component::IRC::Plugin::AutoJoin->new(
+                Channels => \%channels,
+                RejoinOnKick => 1,
+                Retry_when_banned => 10
+                )
+            );
+    $irc->yield('connect');
+    $_[KERNEL]->delay(save_scores => 60);
+}
+
+sub irc_public {
+    my ($player) = (split /!/, $_[ARG0])[0];
+    #my $where = $_[ARG1]->[0];
+    my $what = $_[ARG2];
+
+    return unless $what =~ /^\@/;
+    $what =~ s/^\@//;
+
+    my ($command, @args) = split ' ', $what;
+    $command = "\L$command";
+    return unless exists $commands{$command};
+
+    $commands{$command}->($player, @args);
+}
+
+sub buy {
+    my ($player, $item, $amount) = @_;
+
+    $amount = defined $amount ? $amount : 1;
+    return unless $amount =~ /^\d+$/ && $amount > 0;
+    return unless exists $weapons{$item};
+    return unless exists $players{$player};
+
+    my $cost = $weapons{$item}{price} * $amount;
+
+    if ($players{$player}{balance} < $cost) {
+        $irc->yield(notice => $player => q{You're too broke to make this purchase, fucktard.});
+    } else {
+        $players{$player}{balance} -= $cost;
+        $players{$player}{$item}   += $amount;
+  
+        my $balance = commafy($players{$player}{balance});
+        $amount     = commafy($amount);
+        $cost       = commafy($cost);
+
+        $irc->yield(privmsg => $channel => "$player: You have purchased $amount $item(s) for \$$cost dollars. You now have \$$balance dollar(s).")
+    }
+}
+
+sub commafy {
+# taken from perlfaq
+# Did use Number::Format::format_number() but it did not like
+# huge numbers
+    my ($num) = @_;
+    $num =~ s/(^[-+]?\d+?(?=(?>(?:\d{3})+)(?!\d))|\G\d{3}(?=\d))/$1,/g;
+    return $num
+}
+
+sub find_nugget {
+    my ($player) = @_;
+    
+    my $charm = $players{$player}{charm};
+#   give player 1 turn if they have less than 10 charms
+    $charm = $charm < 10 ? 10 : $charm;
+
+    # < 100 charms, cost is 10 charms 
+    # < 1000 charms, cost is 100 charms, etc 
+    my $cost = '1' . '0' x ((length $charm) - 1);
+
+    while ($charm / $cost > 0) {
+        if (int rand 10000 > 9900) {
+            $players{$player}{nugget}++;
+            $irc->yield(privmsg => $channel => "$player: " . YELLOW . q{You've found a gold nugget!});
+            return
+        }
+        $charm -= $cost;
+    }
+}
+
+sub inv {
+    my ($player, $who) = @_;
+
+    # if $who is not supplied, give rank of caller's name
+    $who = defined $who ? $who : $player;
+
+    return unless exists $players{$who};
+
+    $irc->yield(privmsg => $channel => 
+            CYAN . "$who" . NORMAL . ' => '  .
+            CYAN . '{ ' . NORMAL .
+            $players{$who}{prostitute} . PURPLE . ' prostitutes ' . 
+            NORMAL . $players{$who}{gun} . RED . ' guns ' .
+            NORMAL . $players{$who}{charm}  . LIGHT_GREEN   .
+            ' charms ' . NORMAL . $players{$who}{nugget} . 
+            YELLOW . ' nuggets ' .CYAN . '}');
+}
+ 
+sub load_scores {
+    if (-e $db) {
+        my $ref = lock_retrieve($db);
+        %players = %$ref
+    }
+}
+
+sub sort_scores {
+    my @sorted = 
+      map  { $_->[0] }
+      sort { $b->[1] <=> $a->[1] } 
+      map  { [$players{$_}, $players{$_}{score}] } 
+      keys %players;
+
+    return \@sorted
+}
+
+sub top3 {
+    my $sorted = sort_scores();
+    my $total  = @$sorted;
+   
+    # if less than 3 players, accomadate
+    my $upper  = $total < 3 ? $total - 1 : 2;
+
+    for my $idx (0 .. $upper) {
+        my $name = $sorted->[$idx]{name};
+        my $balance =
+            commafy($sorted->[$idx]{balance});
+        my $rank = $idx + 1;
+        $irc->yield(privmsg => $channel =>
+                 YELLOW . "($rank/$total) " . CYAN . "$name "
+                . LIGHT_GREEN . "\$$balance");
+    }
+}
+
+sub rank {
+    my ($player, $who) = @_;
+
+    # if $who is not supplied, give rank of caller's name
+    $who = defined $who ? $who : $player;
+
+#  my $info = $irc->nick_info($who);
+#   return unless $info;
+
+#    my $id = $info->{User} . '@' . $info->{Host};
+    if ($who =~ /^\d+$/ && $who > 0) {
+    my $sorted = sort_scores();
+ $irc->yield(privmsg => $channel => 
+            YELLOW . "($who/" . scalar @$sorted . ') ' . CYAN
+     . $sorted->[$who-1]->{name} . ' ' 
+             . LIGHT_GREEN . '$' .
+            commafy($sorted->[$who-1]->{balance}));
+ 
+    } else {
+        return unless exists $players{$who};
+    my $sorted = sort_scores();
+my $rank = firstidx { $_->{name} eq $who } @$sorted;
+    $rank += 1;
+ $irc->yield(privmsg => $channel => 
+            YELLOW . "($rank/" . scalar @$sorted . ') ' . CYAN . "$who " 
+             . LIGHT_GREEN . '$' .
+            commafy($players{$who}{balance}));
+ 
+
+
+    }
+
+       }
+
+#sub reset {
+#    my (undef, $admin, $player) = @_;
+
+#    return unless $admin =~
+#       /^\Q~go|dfish@\E(morpheus|minerva)\Q.redbrick.dcu.ie/i;
+
+#    my $info = $irc->nick_info($player);
+#    return unless $info;
+
+#    my $id = $info->{User} . '@' . $info->{Host};
+    # Only reset if is a current player
+#    $players{$id} = Player->new(name => $id) if exists $players{$id}
+#}
+
+
+sub save_scores {
+    lock_store \%players, $db;
+    $_[KERNEL]->delay(save_scores => 60);
+}
+
+sub sell {
+    my ($player, $item, $amount) = @_;
+
+    $amount = defined $amount ? $amount : 1;
+    return unless $amount =~ /^\d+$/ && $amount > 0;
+    return unless $item eq 'nugget';
+    return unless exists $players{$player};
+
+    if ($players{$player}{nugget} < $amount) {
+        $irc->yield(notice => $player => 'You cannot sell more nuggets than you own, dumbfuck.');
+    } else {
+        # < 100 charms => nugget 1m, < 1000 charms => nugget 10m, etc
+        my $value = '1' . '0' x ((length $players{$player}{charm})+ 4);
+        my $cost  = $amount * $value;
+        $players{$player}{balance} += $cost;
+        $players{$player}{score}   += $cost;
+        $players{$player}{nugget}  -= $amount;
+
+        my $balance = commafy($players{$player}{balance});
+        $amount     = commafy($amount);
+        $cost       = commafy($cost);
+
+        $irc->yield(privmsg => $channel => 
+                "$player: You have sold $amount nugget(s) for \$$cost dollars. You now have \$$balance dollars.")
+    }
+}
+
+sub steal {
+    my ($player) = @_;
+
+    # players are added when they first steal
+    if (!exists $players{$player}) {
+        $players{$player} = Player->new(name => $player)
+    }
+
+    my $diff = $players{$player}{timeout} - time;
+    if ($diff > 0) { 
+        my $output = 'You can steal again in ';
+        if ($diff < 60) {
+            $output .= "$diff seconds."
+        } else {
+            my $mins = int $diff / 60;
+            my $secs = $diff % 60;
+            $output .= "$mins minute(s) $secs second(s)."
+        }
+
+        $irc->yield(notice => $player => $output);
+        return
+    }
+
+    my $stealth = sum map { ($players{$player}{$_} || 1) * $weapons{$_}{skill} } keys %weapons; 
+    my $loot = ($stealth * 200) + int rand $stealth * 100;
+
+    $players{$player}{balance} += $loot;
+    $players{$player}{score}   += $loot;
+
+    my $balance = commafy($players{$player}{balance});
+    $loot       = commafy($loot);
+
+    $irc->yield(privmsg => $channel => "$player: You have stolen \$$loot dollars. You now have \$$balance dollars.");
+
+    my $current = time;
+    my $delay   = (int rand 481) + 120;
+    $players{$player}{timeout} = $current + $delay;
+    
+    find_nugget($player);
+}
+
+sub show_store {
+    my ($player) = @_;
+
+    return unless exists $players{$player};
+    $irc->yield(privmsg => $channel =>  CYAN . 'store ' .
+            NORMAL . '=> ' . CYAN . '{ ' . PURPLE .
+            'prostitute: ' . NORMAL . '$2,000 ' . 
+             RED . 'gun: ' . NORMAL . '$5,000 ' . 
+             LIGHT_GREEN . 'charm: ' . NORMAL . '$10,000' .
+            CYAN . ' }');
+}
