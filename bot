@@ -117,9 +117,9 @@ sub calc {
 
     return unless exists $players{$player};
     my $cash = $players{$player}{balance};
-    my $num_guns   = int $cash / $weapons{gun}{price};
-    my $num_pros   = int $cash / $weapons{prostitute}{price};
-    my $num_charms = int $cash / $weapons{charm}{price};
+    my $num_guns   = sprintf '%d', $cash / $weapons{gun}{price};
+    my $num_pros   = sprintf '%d', $cash / $weapons{prostitute}{price};
+    my $num_charms = sprintf '%d', $cash / $weapons{charm}{price};
 
     my $msg = "You can purchase: $num_pros prostitute(s) | $num_guns gun(s) "
         . "| $num_charms charms.";
@@ -314,7 +314,7 @@ sub steal {
     }
 
     my $stealth = sum map { ($players{$player}{$_} || 1) * $weapons{$_}{skill} } keys %weapons; 
-    my $loot = ($stealth * 200) + int rand $stealth * 100;
+    my $loot = ($stealth * 200) + sprintf '%d', rand $stealth * 100;
 
     $players{$player}{balance} += $loot;
     $players{$player}{score}   += $loot;
