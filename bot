@@ -116,10 +116,10 @@ sub calc {
     my ($player) = @_;
 
     return unless exists $players{$player};
-    my $cash = $players{$player}->{balance};
-    my $num_guns   = int $cash / ($players{$player}->{gun} || 1);
-    my $num_pros   = int $cash / ($players{$player}->{prostitute} || 1);
-    my $num_charms = int $cash / ($players{$player}->{charm} || 1);
+    my $cash = $players{$player}{balance};
+    my $num_guns   = int $cash / $weapons{gun}{price};
+    my $num_pros   = int $cash / $weapons{prostitute}{price};
+    my $num_charms = int $cash / $weapons{charm}{price};
 
     my $msg = "You can purchase: $num_pros prostitute(s) | $num_guns gun(s) "
         . "| $num_charms charms.";
