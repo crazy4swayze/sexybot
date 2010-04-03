@@ -150,7 +150,7 @@ sub find_nugget {
 
     while ($charm / $cost > 0) {
         if (int rand 10000 > 9900) {
-            $players{$player}{nugget}++;
+            $players{$player}{nugget} += 1;
             $irc->yield(privmsg => $channel => "$player: " . YELLOW . q{You've found a gold nugget!});
             return
         }
