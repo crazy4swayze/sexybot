@@ -85,7 +85,7 @@ sub irc_public {
     $command = "\L$command";
     return unless exists $commands{$command};
 
-    $commands{$command}->($player, @args);
+    $commands{$command}->("\L$player", @args);
 }
 
 sub buy {
@@ -148,7 +148,10 @@ sub find_nugget {
     # < 1000 charms, cost is 100 charms, etc 
     my $cost = '1' . '0' x ((length $charm) - 1);
 
-    while ($charm / $cost > 0) {
+#   count variable to make sure max of 9 turns
+#   due to amount of charm representation bug
+    my $count = 0;
+    while ($charm / $cost > 0 && $count++ < 9) {
         if (int rand 10000 > 9900) {
             $players{$player}{nugget}++;
             $irc->yield(privmsg => $channel => "$player: " . YELLOW . q{You've found a gold nugget!});
