@@ -85,7 +85,7 @@ sub irc_public {
     $command = "\L$command";
     return unless exists $commands{$command};
 
-    $commands{$command}->("\L$player", @args);
+    $commands{$command}->($player, @args);
 }
 
 sub buy {
@@ -94,17 +94,19 @@ sub buy {
     $amount = defined $amount ? $amount : 1;
     return unless $amount =~ /^\d+$/ && $amount > 0;
     return unless exists $weapons{$item};
-    return unless exists $players{$player};
+
+    my $key = "\L$player";
+    return unless exists $players{$key};
 
     my $cost = $weapons{$item}{price} * $amount;
 
-    if ($players{$player}{balance} < $cost) {
+    if ($players{$key}{balance} < $cost) {
         $irc->yield(notice => $player => q{You're too broke to make this purchase, fucktard.});
     } else {
-        $players{$player}{balance} -= $cost;
-        $players{$player}{$item}   += $amount;
+        $players{$key}{balance} -= $cost;
+        $players{$key}{$item}   += $amount;
   
-        my $balance = commafy($players{$player}{balance});
+        my $balance = commafy($players{$key}{balance});
         $amount     = commafy($amount);
         $cost       = commafy($cost);
 
@@ -115,12 +117,12 @@ sub buy {
 sub calc {
     my ($player) = @_;
 
-    return unless exists $players{$player};
-    my $cash = $players{$player}{balance};
+    my $key = "\L$player";
+    return unless exists $players{$key};
+    my $cash = $players{$key}{balance};
     my $num_guns   = $cash / $weapons{gun}{price};
     my $num_pros   = $cash / $weapons{prostitute}{price};
     my $num_charms = $cash / $weapons{charm}{price};
-
     s/\..*// for $num_guns, $num_pros, $num_charms;
 
     my $msg = "You can purchase: $num_pros prostitute(s) | $num_guns gun(s) "
@@ -140,7 +142,8 @@ sub commafy {
 sub find_nugget {
     my ($player) = @_;
     
-    my $charm = $players{$player}{charm};
+    my $key = "\L$player";
+    my $charm = $players{$key}{charm};
 #   give player 1 turn if they have less than 10 charms
     $charm = $charm < 10 ? 10 : $charm;
 
@@ -148,12 +151,10 @@ sub find_nugget {
     # < 1000 charms, cost is 100 charms, etc 
     my $cost = '1' . '0' x ((length $charm) - 1);
 
-#   count variable to make sure max of 9 turns
-#   due to amount of charm representation bug
     my $count = 0;
     while ($charm / $cost > 0 && $count++ < 9) {
         if (int rand 10000 > 9900) {
-            $players{$player}{nugget}++;
+            $players{$key}{nugget}++;
             $irc->yield(privmsg => $channel => "$player: " . YELLOW . q{You've found a gold nugget!});
             return
         }
@@ -167,15 +168,16 @@ sub inv {
     # if $who is not supplied, give rank of caller's name
     $who = defined $who ? $who : $player;
 
-    return unless exists $players{$who};
+    my $key = "\L$who";
+    return unless exists $players{$key};
 
     $irc->yield(privmsg => $channel => 
             CYAN . "$who" . NORMAL . ' => '  .
             CYAN . '{ ' . NORMAL .
-            $players{$who}{prostitute} . PURPLE . ' prostitutes ' . 
-            NORMAL . $players{$who}{gun} . RED . ' guns ' .
-            NORMAL . $players{$who}{charm}  . LIGHT_GREEN   .
-            ' charms ' . NORMAL . $players{$who}{nugget} . 
+            $players{$key}{prostitute} . PURPLE . ' prostitutes ' . 
+            NORMAL . $players{$key}{gun} . RED . ' guns ' .
+            NORMAL . $players{$key}{charm}  . LIGHT_GREEN   .
+            ' charms ' . NORMAL . $players{$key}{nugget} . 
             YELLOW . ' nuggets ' .CYAN . '}');
 }
  
@@ -233,14 +235,15 @@ sub rank {
             commafy($sorted->[$who-1]->{balance}));
  
     } else {
-        return unless exists $players{$who};
+        my $key = "\L$who";
+        return unless exists $players{$key};
     my $sorted = sort_scores();
-my $rank = firstidx { $_->{name} eq $who } @$sorted;
+my $rank = firstidx { $_->{name} eq $key } @$sorted;
     $rank += 1;
  $irc->yield(privmsg => $channel => 
             YELLOW . "($rank/" . scalar @$sorted . ') ' . CYAN . "$who " 
              . LIGHT_GREEN . '$' .
-            commafy($players{$who}{balance}));
+            commafy($players{$key}{balance}));
  
 
 
@@ -274,19 +277,21 @@ sub sell {
     $amount = defined $amount ? $amount : 1;
     return unless $amount =~ /^\d+$/ && $amount > 0;
     return unless $item eq 'nugget';
-    return unless exists $players{$player};
+    
+    my $key = "\L$player";
+    return unless exists $players{$key};
 
-    if ($players{$player}{nugget} < $amount) {
+    if ($players{$key}{nugget} < $amount) {
         $irc->yield(notice => $player => 'You cannot sell more nuggets than you own, dumbfuck.');
     } else {
         # < 100 charms => nugget 1m, < 1000 charms => nugget 10m, etc
-        my $value = '1' . '0' x ((length $players{$player}{charm})+ 4);
+        my $value = '1' . '0' x ((length $players{$key}{charm})+ 4);
         my $cost  = $amount * $value;
-        $players{$player}{balance} += $cost;
-        $players{$player}{score}   += $cost;
-        $players{$player}{nugget}  -= $amount;
+        $players{$key}{balance} += $cost;
+        $players{$key}{score}   += $cost;
+        $players{$key}{nugget}  -= $amount;
 
-        my $balance = commafy($players{$player}{balance});
+        my $balance = commafy($players{$key}{balance});
         $amount     = commafy($amount);
         $cost       = commafy($cost);
 
@@ -298,12 +303,13 @@ sub sell {
 sub steal {
     my ($player) = @_;
 
+    my $key = "\L$player";
     # players are added when they first steal
-    if (!exists $players{$player}) {
-        $players{$player} = Player->new(name => $player)
+    if (!exists $players{$key}) {
+        $players{$key} = Player->new(name => $key)
     }
 
-    my $diff = $players{$player}{timeout} - time;
+    my $diff = $players{$key}{timeout} - time;
     if ($diff > 0) { 
         my $output = 'You can steal again in ';
         if ($diff < 60) {
@@ -318,20 +324,20 @@ sub steal {
         return
     }
 
-    my $stealth = sum map { ($players{$player}{$_} || 1) * $weapons{$_}{skill} } keys %weapons; 
+    my $stealth = sum map { ($players{$key}{$_} || 1) * $weapons{$_}{skill} } keys %weapons; 
     my $loot = ($stealth * 200) + int rand $stealth * 100;
 
-    $players{$player}{balance} += $loot;
-    $players{$player}{score}   += $loot;
+    $players{$key}{balance} += $loot;
+    $players{$key}{score}   += $loot;
 
-    my $balance = commafy($players{$player}{balance});
+    my $balance = commafy($players{$key}{balance});
     $loot       = commafy($loot);
 
     $irc->yield(privmsg => $channel => "$player: You have stolen \$$loot dollars. You now have \$$balance dollars.");
 
     my $current = time;
     my $delay   = (int rand 481) + 120;
-    $players{$player}{timeout} = $current + $delay;
+    $players{$key}{timeout} = $current + $delay;
     
     find_nugget($player);
 }
@@ -339,7 +345,8 @@ sub steal {
 sub show_store {
     my ($player) = @_;
 
-    return unless exists $players{$player};
+    my $key = "\L$player";
+    return unless exists $players{$key};
     $irc->yield(privmsg => $channel =>  CYAN . 'store ' .
             NORMAL . '=> ' . CYAN . '{ ' . PURPLE .
             'prostitute: ' . NORMAL . '$2,000 ' . 
